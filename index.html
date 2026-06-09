@@ -244,7 +244,7 @@
         .node-points { font-size:0.68rem; color:var(--text-sec); }
         .node-count {
             position:absolute; top:-8px; right:-8px;
-            background:var(--primary); color:#fff;
+            background:#1e88e5; color:#fff;
             width:22px; height:22px; border-radius:50%;
             display:flex; align-items:center; justify-content:center;
             font-size:0.6rem; font-weight:700; border:2px solid var(--card);
@@ -629,13 +629,14 @@
     ];
     const PERMS = {
         viewer:  { view:true, add:false, edit:false, delete:false, import:false, export:true },
-        manager: { view:true, add:true,  edit:true,  delete:false, import:true,  export:true },
+        manager: { view:true, add:true,  edit:false, delete:false, import:false, export:true },
         admin:   { view:true, add:true,  edit:true,  delete:true,  import:true,  export:true }
     };
 
     let currentRole = 'viewer';
     let membersCache = [];
     let membersMap = new Map();
+    let currentUserMember = null;
     let currentChart = null;
 
     // Zoom state
@@ -681,6 +682,16 @@
     function findRoots() {
         const ids = new Set(membersCache.map(m => m.id));
         return membersCache.filter(m => !m.sponsorId || !ids.has(m.sponsorId)).map(m => m.id);
+    }
+    function isUnderBranch(nodeId, branchRootId) {
+        if (!nodeId || !branchRootId) return false;
+        if (nodeId === branchRootId) return true;
+        let current = membersMap.get(nodeId);
+        while (current && current.sponsorId) {
+            if (current.sponsorId === branchRootId) return true;
+            current = membersMap.get(current.sponsorId);
+        }
+        return false;
     }
 
     // ==========================================
@@ -771,14 +782,31 @@
         if (user) {
             try {
                 const userRef = db.collection('users').doc(user.uid);
-                const userDoc = await userRef.get();
+                let userDoc = await userRef.get();
                 if (!userDoc.exists) {
-                    const role = user.email === ADMIN_EMAIL ? 'admin' : 'viewer';
-                    await userRef.set({ email: user.email, displayName: user.displayName || '', role: role, createdAt: new Date(), lastLogin: new Date() });
-                    currentRole = role;
+                    const emailQuery = await db.collection('users').where('email', '==', user.email).get();
+                    if (!emailQuery.empty) {
+                        const existingDoc = emailQuery.docs[0];
+                        const existingData = existingDoc.data();
+                        currentRole = existingData.role || 'viewer';
+                        await userRef.set({
+                            email: user.email,
+                            displayName: user.displayName || existingData.displayName || '',
+                            role: currentRole,
+                            createdAt: existingData.createdAt || new Date(),
+                            lastLogin: new Date()
+                        });
+                        if (existingDoc.id !== user.uid) {
+                            await db.collection('users').doc(existingDoc.id).delete();
+                        }
+                    } else {
+                        const role = user.email === ADMIN_EMAIL ? 'admin' : 'viewer';
+                        await userRef.set({ email: user.email, displayName: user.displayName || '', role: role, createdAt: new Date(), lastLogin: new Date() });
+                        currentRole = role;
+                    }
                 } else {
                     currentRole = userDoc.data().role || 'viewer';
-                    await userRef.update({ lastLogin: new Date() });
+                    await userRef.update({ lastLogin: new Date(), displayName: user.displayName || userDoc.data().displayName || '' });
                 }
             } catch (e) {
                 currentRole = user.email === ADMIN_EMAIL ? 'admin' : 'viewer';
@@ -811,6 +839,9 @@
                 membersCache.push(d);
                 membersMap.set(doc.id, d);
             });
+            // Tìm member tương ứng với email đang đăng nhập
+            const userEmail = auth.currentUser?.email;
+            currentUserMember = membersCache.find(m => m.email && m.email.toLowerCase() === userEmail?.toLowerCase()) || null;
         } catch (e) {
             showToast('Không thể tải dữ liệu', 'error');
         }
@@ -1000,16 +1031,27 @@
 
         // Add child button
         if (can('add')) {
-            const addBtn = document.createElement('button');
-            addBtn.className = 'node-add-btn';
-            const addIcon = document.createElement('i');
-            addIcon.className = 'fas fa-plus';
-            addBtn.appendChild(addIcon);
-            addBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openMemberForm(null, memberId);
-            });
-            node.appendChild(addBtn);
+            let showAdd = false;
+            if (currentRole === 'admin') {
+                showAdd = true;
+            } else if (currentRole === 'manager' && currentUserMember) {
+                // User thường (manager) chỉ được thêm dưới cấp của mình (chính mình hoặc cấp dưới của mình)
+                if (isUnderBranch(memberId, currentUserMember.id)) {
+                    showAdd = true;
+                }
+            }
+            if (showAdd) {
+                const addBtn = document.createElement('button');
+                addBtn.className = 'node-add-btn';
+                const addIcon = document.createElement('i');
+                addIcon.className = 'fas fa-plus';
+                addBtn.appendChild(addIcon);
+                addBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openMemberForm(null, memberId);
+                });
+                node.appendChild(addBtn);
+            }
         }
 
         // Click to view detail
@@ -1028,6 +1070,11 @@
                 if (childLi) childUl.appendChild(childLi);
             });
             li.appendChild(childUl);
+
+            // Mặc định thu gọn các nhánh từ cấp 3 trở đi (level >= 2)
+            if (level >= 2) {
+                li.classList.add('collapsed');
+            }
         }
 
         return li;
@@ -1418,6 +1465,12 @@
 
             membersCache.forEach(m => {
                 if (invalidSponsorIds.has(m.id)) return; // Tránh tự chọn bản thân hoặc cấp dưới làm sponsor
+                
+                // Thêm kiểm tra quyền cho User thường (manager): chỉ được chọn chính mình hoặc cấp dưới của mình làm Sponsor
+                if (currentRole === 'manager' && currentUserMember) {
+                    if (!isUnderBranch(m.id, currentUserMember.id)) return;
+                }
+
                 const opt = document.createElement('option');
                 opt.value = m.id;
                 opt.textContent = m.name + ' (' + getRank(m.points||0).name + ')';
@@ -1883,7 +1936,7 @@
             thead.appendChild(hr);
             table.appendChild(thead);
             const tbody = document.createElement('tbody');
-            const perms = [['Xem',true,true,true],['Thêm',false,true,true],['Sửa',false,true,true],['Xóa',false,false,true],['Nhập CSV',false,true,true],['Xuất CSV',true,true,true]];
+            const perms = [['Xem',true,true,true],['Thêm (dưới cấp)',false,true,true],['Sửa',false,false,true],['Xóa',false,false,true],['Nhập CSV',false,false,true],['Xuất CSV',true,true,true]];
             perms.forEach(p => {
                 const tr = document.createElement('tr');
                 p.forEach((v, i) => {
@@ -1902,71 +1955,183 @@
         // === User Management (Admin only) ===
         if (currentRole === 'admin') {
             section.appendChild(buildSettingsGroup('fa-users-cog', 'Quản lý người dùng', async (body) => {
-                const loading = document.createElement('div');
-                loading.style.cssText = 'text-align:center;color:var(--text-hint);padding:16px;';
-                loading.textContent = 'Đang tải...';
-                body.appendChild(loading);
-                try {
-                    const snap = await db.collection('users').get();
+                const renderUserList = async () => {
                     body.replaceChildren();
-                    if (snap.empty) {
-                        const noUser = document.createElement('div');
-                        noUser.style.cssText = 'text-align:center;color:var(--text-hint);padding:12px;font-size:0.82rem;';
-                        noUser.textContent = 'Chưa có người dùng nào.';
-                        body.appendChild(noUser);
-                        return;
+                    
+                    // Nút thêm User
+                    const addBtn = document.createElement('button');
+                    addBtn.className = 'btn btn-primary btn-sm';
+                    addBtn.style.marginBottom = '14px';
+                    addBtn.innerHTML = '<i class="fas fa-plus"></i> Thêm người dùng';
+                    addBtn.addEventListener('click', () => openUserForm());
+                    body.appendChild(addBtn);
+                    
+                    const loading = document.createElement('div');
+                    loading.style.cssText = 'text-align:center;color:var(--text-hint);padding:16px;';
+                    loading.textContent = 'Đang tải...';
+                    body.appendChild(loading);
+                    
+                    try {
+                        const snap = await db.collection('users').get();
+                        loading.remove();
+                        if (snap.empty) {
+                            const noUser = document.createElement('div');
+                            noUser.style.cssText = 'text-align:center;color:var(--text-hint);padding:12px;font-size:0.82rem;';
+                            noUser.textContent = 'Chưa có người dùng nào.';
+                            body.appendChild(noUser);
+                            return;
+                        }
+                        snap.forEach(doc => {
+                            const u = doc.data();
+                            const card = document.createElement('div');
+                            card.className = 'role-card';
+                            
+                            const avatar = document.createElement('div');
+                            avatar.className = 'role-avatar';
+                            const avIcon = document.createElement('i');
+                            avIcon.className = 'fas fa-user';
+                            avatar.appendChild(avIcon);
+                            card.appendChild(avatar);
+                            
+                            const info = document.createElement('div');
+                            info.className = 'role-info';
+                            const name = document.createElement('div');
+                            name.className = 'role-name';
+                            name.textContent = u.displayName || u.email.split('@')[0];
+                            info.appendChild(name);
+                            const email = document.createElement('div');
+                            email.className = 'role-email';
+                            email.textContent = u.email || '';
+                            info.appendChild(email);
+                            card.appendChild(info);
+                            
+                            // Right side: select + delete
+                            const rightActions = document.createElement('div');
+                            rightActions.style.cssText = 'display:flex;align-items:center;gap:8px;';
+                            
+                            const sel = document.createElement('select');
+                            sel.className = 'role-select';
+                            [['viewer','Xem'],['manager','Quản lý'],['admin','Admin']].forEach(r => {
+                                const opt = document.createElement('option');
+                                opt.value = r[0];
+                                opt.textContent = r[1];
+                                if (u.role === r[0]) opt.selected = true;
+                                sel.appendChild(opt);
+                            });
+                            sel.addEventListener('change', async () => {
+                                try {
+                                    await db.collection('users').doc(doc.id).update({ role: sel.value });
+                                    showToast('Đã cập nhật quyền cho ' + (u.displayName || u.email), 'success');
+                                    if (doc.id === auth.currentUser?.uid) {
+                                        currentRole = sel.value;
+                                        const roleLabels = { admin:'Quản trị', manager:'Quản lý', viewer:'Xem' };
+                                        document.getElementById('headerRole').textContent = roleLabels[currentRole] || currentRole;
+                                    }
+                                } catch (e) { showToast('Lỗi cập nhật quyền', 'error'); }
+                            });
+                            rightActions.appendChild(sel);
+                            
+                            // Delete button (Không cho tự xóa chính mình)
+                            if (doc.id !== auth.currentUser?.uid) {
+                                const delUserBtn = document.createElement('button');
+                                delUserBtn.className = 'btn btn-outline btn-sm';
+                                delUserBtn.style.cssText = 'padding:6px 8px;color:#ef4444;border-color:#fca5a5;background:none;border-radius:8px;';
+                                delUserBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                                delUserBtn.addEventListener('click', () => {
+                                    showConfirm('Xóa người dùng ' + (u.email) + ' khỏi hệ thống?', async () => {
+                                        try {
+                                            await db.collection('users').doc(doc.id).delete();
+                                            showToast('Đã xóa người dùng', 'success');
+                                            renderUserList();
+                                        } catch(e) { showToast('Lỗi khi xóa người dùng', 'error'); }
+                                    }, '🗑️');
+                                });
+                                rightActions.appendChild(delUserBtn);
+                            }
+                            
+                            card.appendChild(rightActions);
+                            body.appendChild(card);
+                        });
+                    } catch (e) {
+                        loading.remove();
+                        const err = document.createElement('div');
+                        err.style.cssText = 'color:var(--rank-4);text-align:center;padding:12px;font-size:0.82rem;';
+                        err.textContent = 'Không thể tải danh sách người dùng.';
+                        body.appendChild(err);
                     }
-                    snap.forEach(doc => {
-                        const u = doc.data();
-                        const card = document.createElement('div');
-                        card.className = 'role-card';
-                        const avatar = document.createElement('div');
-                        avatar.className = 'role-avatar';
-                        const avIcon = document.createElement('i');
-                        avIcon.className = 'fas fa-user';
-                        avatar.appendChild(avIcon);
-                        card.appendChild(avatar);
-                        const info = document.createElement('div');
-                        info.className = 'role-info';
-                        const name = document.createElement('div');
-                        name.className = 'role-name';
-                        name.textContent = u.displayName || u.email || 'N/A';
-                        info.appendChild(name);
-                        const email = document.createElement('div');
-                        email.className = 'role-email';
-                        email.textContent = u.email || '';
-                        info.appendChild(email);
-                        card.appendChild(info);
-                        const sel = document.createElement('select');
-                        sel.className = 'role-select';
-                        ['viewer','manager','admin'].forEach(r => {
+                };
+
+                const openUserForm = () => {
+                    openSheet((sheetBody) => {
+                        const title = document.createElement('div');
+                        title.className = 'sheet-title';
+                        title.textContent = '➕ Thêm người dùng mới';
+                        sheetBody.appendChild(title);
+                        
+                        sheetBody.appendChild(createField('Email người dùng *', 'email', 'formUserEmail', '', 'example@gmail.com'));
+                        
+                        const roleGroup = document.createElement('div');
+                        roleGroup.className = 'form-group';
+                        const roleLabel = document.createElement('label');
+                        roleLabel.className = 'form-label';
+                        roleLabel.textContent = 'Quyền hạn';
+                        roleGroup.appendChild(roleLabel);
+                        const roleSelect = document.createElement('select');
+                        roleSelect.className = 'form-select';
+                        roleSelect.id = 'formUserRole';
+                        [['viewer','Viewer (Chỉ xem)'],['manager','Manager (Quản lý)'],['admin','Admin (Quản trị)']].forEach(r => {
                             const opt = document.createElement('option');
-                            opt.value = r;
-                            opt.textContent = r.charAt(0).toUpperCase() + r.slice(1);
-                            if (u.role === r) opt.selected = true;
-                            sel.appendChild(opt);
+                            opt.value = r[0];
+                            opt.textContent = r[1];
+                            roleSelect.appendChild(opt);
                         });
-                        sel.addEventListener('change', async () => {
+                        roleGroup.appendChild(roleSelect);
+                        sheetBody.appendChild(roleGroup);
+                        
+                        const saveBtn = document.createElement('button');
+                        saveBtn.className = 'btn btn-primary btn-block';
+                        saveBtn.style.marginTop = '14px';
+                        saveBtn.textContent = 'Lưu người dùng';
+                        saveBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+                        saveBtn.addEventListener('click', async () => {
+                            const email = document.getElementById('formUserEmail')?.value?.trim();
+                            const role = document.getElementById('formUserRole')?.value;
+                            if (!email) { showToast('Vui lòng nhập Email', 'warning'); return; }
+                            
                             try {
-                                await db.collection('users').doc(doc.id).update({ role: sel.value });
-                                showToast('Đã cập nhật quyền cho ' + (u.displayName || u.email), 'success');
-                                if (doc.id === auth.currentUser?.uid) {
-                                    currentRole = sel.value;
-                                    const roleLabels = { admin:'Quản trị', manager:'Quản lý', viewer:'Xem' };
-                                    document.getElementById('headerRole').textContent = roleLabels[currentRole] || currentRole;
+                                // Kiểm tra xem email đã tồn tại chưa
+                                const check = await db.collection('users').where('email', '==', email).get();
+                                if (!check.empty) {
+                                    showToast('Email này đã tồn tại trong hệ thống', 'warning');
+                                    return;
                                 }
-                            } catch (e) { showToast('Lỗi cập nhật quyền', 'error'); }
+                                await db.collection('users').add({
+                                    email: email,
+                                    role: role,
+                                    displayName: '',
+                                    createdAt: new Date(),
+                                    lastLogin: null
+                                });
+                                showToast('Đã thêm người dùng thành công', 'success');
+                                closeSheet();
+                                renderUserList();
+                            } catch(e) {
+                                showToast('Lỗi khi thêm người dùng', 'error');
+                            }
                         });
-                        card.appendChild(sel);
-                        body.appendChild(card);
+                        sheetBody.appendChild(saveBtn);
+                        
+                        const cancelBtn = document.createElement('button');
+                        cancelBtn.className = 'btn btn-outline btn-block';
+                        cancelBtn.style.marginTop = '8px';
+                        cancelBtn.textContent = 'Hủy';
+                        cancelBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+                        cancelBtn.addEventListener('click', closeSheet);
+                        sheetBody.appendChild(cancelBtn);
                     });
-                } catch (e) {
-                    body.replaceChildren();
-                    const err = document.createElement('div');
-                    err.style.cssText = 'color:var(--rank-4);text-align:center;padding:12px;font-size:0.82rem;';
-                    err.textContent = 'Không thể tải danh sách người dùng.';
-                    body.appendChild(err);
-                }
+                };
+
+                await renderUserList();
             }));
         }
 
