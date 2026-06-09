@@ -335,6 +335,15 @@
             width:40px; height:4px; border-radius:4px;
             background:#d1d5db; margin:0 auto 16px;
         }
+        .sheet-close-btn {
+            position: absolute; top: 12px; right: 16px;
+            width: 32px; height: 32px; border-radius: 50%;
+            background: var(--bg); border: none;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-sec); font-size: 0.9rem; cursor: pointer;
+            z-index: 10; transition: all 0.2s;
+        }
+        .sheet-close-btn:active { background: var(--border); transform: scale(0.9); }
         .sheet-title { font-weight:700; font-size:1.1rem; margin-bottom:16px; }
 
         /* ===== FORMS ===== */
@@ -571,6 +580,7 @@
     <div class="bottom-sheet" id="bottomSheet">
         <div class="sheet-backdrop" id="sheetBackdrop"></div>
         <div class="sheet-content" id="sheetContent">
+            <button class="sheet-close-btn" id="sheetCloseBtn" aria-label="Đóng"><i class="fas fa-times"></i></button>
             <div class="sheet-handle"></div>
             <div id="sheetBody"></div>
         </div>
@@ -724,6 +734,7 @@
     }
     function closeSheet() { document.getElementById('bottomSheet').classList.remove('active'); }
     document.getElementById('sheetBackdrop').addEventListener('click', closeSheet);
+    document.getElementById('sheetCloseBtn').addEventListener('click', closeSheet);
 
     // Helper: create form field
     function createField(labelText, type, id, value = '', placeholder = '') {
@@ -1215,6 +1226,21 @@
             if (infoBox.lastChild) infoBox.lastChild.style.borderBottom = 'none';
             body.appendChild(infoBox);
 
+            // Note section
+            if (member.note) {
+                const noteDiv = document.createElement('div');
+                noteDiv.style.cssText = 'background:var(--primary-light);border-left:4px solid var(--primary);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.85rem;';
+                const noteTitle = document.createElement('div');
+                noteTitle.style.cssText = 'font-weight:700;color:var(--primary-dark);margin-bottom:4px;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;';
+                noteTitle.textContent = 'Ghi chú';
+                noteDiv.appendChild(noteTitle);
+                const noteText = document.createElement('div');
+                noteText.style.cssText = 'color:var(--text);white-space:pre-wrap;';
+                noteText.textContent = member.note;
+                noteDiv.appendChild(noteText);
+                body.appendChild(noteDiv);
+            }
+
             // Rank progress
             if (nextRank) {
                 const progressDiv = document.createElement('div');
@@ -1336,14 +1362,42 @@
             updateRankPreview(rankPreview, member?.points || 0);
             body.appendChild(rankPreview);
 
-            // Points input listener for auto-rank
+            // Points input listener for auto-rank & auto-clear 0
             const pointsInput = body.querySelector('#formPoints');
             if (pointsInput) {
+                pointsInput.addEventListener('focus', () => {
+                    if (pointsInput.value === '0') {
+                        pointsInput.value = '';
+                    }
+                });
+                pointsInput.addEventListener('blur', () => {
+                    if (pointsInput.value.trim() === '') {
+                        pointsInput.value = '0';
+                        updateRankPreview(document.getElementById('rankPreview'), 0);
+                    }
+                });
                 pointsInput.addEventListener('input', () => {
                     const pts = parseInt(pointsInput.value) || 0;
                     updateRankPreview(document.getElementById('rankPreview'), pts);
                 });
             }
+
+            // Note
+            const noteGroup = document.createElement('div');
+            noteGroup.className = 'form-group';
+            const noteLabel = document.createElement('label');
+            noteLabel.className = 'form-label';
+            noteLabel.textContent = 'Ghi chú';
+            noteGroup.appendChild(noteLabel);
+            const noteInput = document.createElement('textarea');
+            noteInput.className = 'form-input';
+            noteInput.id = 'formNote';
+            noteInput.rows = 2;
+            noteInput.style.fontFamily = 'inherit';
+            noteInput.value = member?.note || '';
+            noteInput.placeholder = 'Nhập ghi chú...';
+            noteGroup.appendChild(noteInput);
+            body.appendChild(noteGroup);
 
             // Sponsor picker
             const sponsorGroup = document.createElement('div');
@@ -1383,7 +1437,13 @@
             saveIcon.className = 'fas fa-save';
             saveBtn.appendChild(saveIcon);
             saveBtn.appendChild(document.createTextNode(isEdit ? ' Cập nhật' : ' Lưu thành viên'));
-            saveBtn.addEventListener('click', () => saveMember(editId));
+            saveBtn.addEventListener('pointerdown', (e) => {
+                e.preventDefault(); // Tránh keyboard co rút gây trượt layout
+            });
+            saveBtn.addEventListener('click', () => {
+                document.activeElement.blur(); // Ẩn keyboard
+                saveMember(editId);
+            });
             body.appendChild(saveBtn);
 
             // Cancel
@@ -1391,6 +1451,9 @@
             cancelBtn.className = 'btn btn-outline btn-block';
             cancelBtn.style.marginTop = '8px';
             cancelBtn.textContent = 'Hủy';
+            cancelBtn.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+            });
             cancelBtn.addEventListener('click', closeSheet);
             body.appendChild(cancelBtn);
         });
@@ -1435,6 +1498,7 @@
             phone: document.getElementById('formPhone')?.value?.trim() || '',
             email: document.getElementById('formEmail')?.value?.trim() || '',
             points: parseInt(document.getElementById('formPoints')?.value) || 0,
+            note: document.getElementById('formNote')?.value?.trim() || '',
             sponsorId: document.getElementById('formSponsor')?.value || null,
             updatedAt: new Date()
         };
@@ -1628,6 +1692,42 @@
         grid.appendChild(card2);
         tab.appendChild(grid);
 
+        // Top leaders
+        const topCard = document.createElement('div');
+        topCard.className = 'card';
+        const topTitle = document.createElement('div');
+        topTitle.style.cssText = 'font-weight:700;margin-bottom:12px;font-size:0.9rem;';
+        topTitle.textContent = '🏆 Top Leader';
+        topCard.appendChild(topTitle);
+
+        const sorted = [...membersCache].sort((a,b) => (b.points||0) - (a.points||0)).slice(0, 5);
+        if (sorted.length === 0) {
+            const noData = document.createElement('div');
+            noData.style.cssText = 'text-align:center;color:var(--text-hint);padding:16px;font-size:0.85rem;';
+            noData.textContent = 'Chưa có dữ liệu';
+            topCard.appendChild(noData);
+        } else {
+            sorted.forEach((m, idx) => {
+                const rank = getRank(m.points||0);
+                const row = document.createElement('div');
+                row.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;border-left:3px solid ${rank.color};`;
+                const num = document.createElement('span');
+                num.style.cssText = 'font-weight:700;color:var(--text-sec);width:18px;';
+                num.textContent = '#' + (idx + 1);
+                row.appendChild(num);
+                const name = document.createElement('span');
+                name.style.cssText = 'flex:1;font-weight:500;font-size:0.85rem;';
+                name.textContent = m.name;
+                row.appendChild(name);
+                const pts = document.createElement('span');
+                pts.style.cssText = 'font-weight:700;color:var(--primary);font-size:0.85rem;';
+                pts.textContent = (m.points||0).toLocaleString('vi-VN') + 'đ';
+                row.appendChild(pts);
+                topCard.appendChild(row);
+            });
+        }
+        tab.appendChild(topCard);
+
         // Chart
         const chartCard = document.createElement('div');
         chartCard.className = 'card';
@@ -1665,42 +1765,6 @@
                 scales: { y: { beginAtZero: true, ticks: { stepSize: 1, font: { family: 'Inter' } } }, x: { ticks: { font: { size: 10, family: 'Inter' } } } }
             }
         });
-
-        // Top leaders
-        const topCard = document.createElement('div');
-        topCard.className = 'card';
-        const topTitle = document.createElement('div');
-        topTitle.style.cssText = 'font-weight:700;margin-bottom:12px;font-size:0.9rem;';
-        topTitle.textContent = '🏆 Top Leader';
-        topCard.appendChild(topTitle);
-
-        const sorted = [...membersCache].sort((a,b) => (b.points||0) - (a.points||0)).slice(0, 5);
-        if (sorted.length === 0) {
-            const noData = document.createElement('div');
-            noData.style.cssText = 'text-align:center;color:var(--text-hint);padding:16px;font-size:0.85rem;';
-            noData.textContent = 'Chưa có dữ liệu';
-            topCard.appendChild(noData);
-        } else {
-            sorted.forEach((m, idx) => {
-                const rank = getRank(m.points||0);
-                const row = document.createElement('div');
-                row.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);border-radius:8px;margin-bottom:6px;border-left:3px solid ${rank.color};`;
-                const num = document.createElement('span');
-                num.style.cssText = 'font-weight:700;color:var(--text-sec);width:18px;';
-                num.textContent = '#' + (idx + 1);
-                row.appendChild(num);
-                const name = document.createElement('span');
-                name.style.cssText = 'flex:1;font-weight:500;font-size:0.85rem;';
-                name.textContent = m.name;
-                row.appendChild(name);
-                const pts = document.createElement('span');
-                pts.style.cssText = 'font-weight:700;color:var(--primary);font-size:0.85rem;';
-                pts.textContent = (m.points||0).toLocaleString('vi-VN') + 'đ';
-                row.appendChild(pts);
-                topCard.appendChild(row);
-            });
-        }
-        tab.appendChild(topCard);
     }
 
     // ==========================================
@@ -1931,7 +1995,7 @@
             }
             const hint = document.createElement('div');
             hint.style.cssText = 'font-size:0.72rem;color:var(--text-hint);margin-top:8px;';
-            hint.textContent = 'CSV format: Tên, Email, Điện thoại, Điểm, Người giới thiệu';
+            hint.textContent = 'CSV format: Tên, Email, Điện thoại, Điểm, Cấp bậc, Người giới thiệu, Ghi chú';
             body.appendChild(hint);
         }));
 
@@ -1995,11 +2059,11 @@
     // 14. IMPORT / EXPORT
     // ==========================================
     function exportCSV() {
-        let csv = '\ufeffTên,Email,Điện thoại,Điểm,Cấp bậc,Người giới thiệu\n';
+        let csv = '\ufeffTên,Email,Điện thoại,Điểm,Cấp bậc,Người giới thiệu,Ghi chú\n';
         membersCache.forEach(m => {
             const rank = getRank(m.points || 0);
             const sponsor = m.sponsorId ? (membersMap.get(m.sponsorId)?.name || '') : '';
-            const row = [m.name||'', m.email||'', m.phone||'', m.points||0, rank.name, sponsor]
+            const row = [m.name||'', m.email||'', m.phone||'', m.points||0, rank.name, sponsor, m.note||'']
                 .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',');
             csv += row + '\n';
         });
@@ -2036,12 +2100,13 @@
                         email: (cols[1] || '').trim(),
                         phone: (cols[2] || '').trim(),
                         points: parseInt(cols[3]) || 0,
+                        note: (cols[6] || '').trim(),
                         sponsorId: null,
                         createdAt: new Date(),
                         updatedAt: new Date()
                     };
-                    // Try to match sponsor by name
-                    const sponsorName = (cols[4] || '').trim();
+                    // Try to match sponsor by name (Sponsor ở cột thứ 6, chỉ số 5)
+                    const sponsorName = (cols[5] || '').trim();
                     if (sponsorName) {
                         const match = membersCache.find(m => (m.name||'').toLowerCase() === sponsorName.toLowerCase());
                         if (match) data.sponsorId = match.id;
