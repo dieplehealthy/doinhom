@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
+    <title>DiepLe Healthy - Quản lý đội nhóm đa cấp</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #f5f7fb;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            padding-bottom: 70px;
+        }
+        .card {
+            background: white;
+            border-radius: 1.2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 1rem;
+            margin-bottom: 1rem;
+            transition: all 0.2s;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #2b7a3e 0%, #1e5a2a 100%);
+            color: white;
+            border-radius: 1.2rem;
+            padding: 1rem;
+        }
+        .rank-badge {
+            display: inline-block;
+            padding: 0.2rem 0.8rem;
+            border-radius: 2rem;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+        .rank-0 { background: #e5e7eb; color: #374151; }
+        .rank-1 { background: #d4edda; color: #155724; }
+        .rank-2 { background: #cce5ff; color: #004085; }
+        .rank-3 { background: #fff3cd; color: #856404; }
+        .rank-4 { background: #f8d7da; color: #721c24; }
+        .rank-5 { background: #d1ecf1; color: #0c5460; }
+        .mobile-menu {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0 12px;
+            z-index: 50;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+        }
+        .menu-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.7rem;
+            color: #6b7280;
+            transition: color 0.2s;
+            background: none;
+            border: none;
+            cursor: pointer;
+        }
+        .menu-item.active {
+            color: #2b7a3e;
+        }
+        .menu-item i {
+            font-size: 1.3rem;
+        }
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.2s ease;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .tree-node {
+            border-left: 2px solid #2b7a3e;
+            margin-left: 1rem;
+            padding-left: 1rem;
+            margin-top: 0.5rem;
+        }
+        .btn-primary {
+            background: #2b7a3e;
+            color: white;
+            border-radius: 2rem;
+            padding: 0.5rem 1.2rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary:active {
+            transform: scale(0.97);
+        }
+        input, select, textarea {
+            border: 1px solid #d1d5db;
+            border-radius: 0.8rem;
+            padding: 0.6rem 1rem;
+            width: 100%;
+            margin-top: 0.25rem;
+            font-size: 0.9rem;
+        }
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            padding: 1rem;
+        }
+        .modal-content {
+            background: white;
+            border-radius: 1.5rem;
+            max-width: 500px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .table-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="max-w-md mx-auto relative">
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-green-800 to-green-700 text-white p-4 rounded-b-2xl shadow-lg sticky top-0 z-20">
+        <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-leaf text-2xl"></i>
+                <div>
+                    <div class="font-bold text-lg">DiepLe Healthy</div>
+                    <div class="text-xs opacity-90">Hệ thống quản lý đa cấp</div>
+                </div>
+            </div>
+            <div id="userInfo" class="text-right text-sm">
+                <i class="fas fa-user-circle"></i> <span id="userName">Chưa đăng nhập</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Nội dung chính -->
+    <div class="p-3" id="mainContent">
+        <!-- Màn hình đăng nhập -->
+        <div id="authScreen" class="card text-center">
+            <i class="fas fa-leaf text-5xl text-green-700 mb-3"></i>
+            <h2 class="text-xl font-bold">Chào mừng đến với DiepLe Healthy</h2>
+            <p class="text-gray-500 text-sm my-3">Đăng nhập để quản lý đội nhóm và theo dõi thành tích</p>
+            <button id="googleLoginBtn" class="btn-primary w-full flex justify-center items-center gap-2">
+                <i class="fab fa-google"></i> Đăng nhập với Google
+            </button>
+        </div>
+
+        <!-- Dashboard chính (sau khi login) -->
+        <div id="dashboardScreen" style="display:none;">
+            <!-- Menu Mobile -->
+            <div class="mobile-menu">
+                <button class="menu-item" data-tab="dashboard"><i class="fas fa-home"></i><span>Dashboard</span></button>
+                <button class="menu-item" data-tab="members"><i class="fas fa-users"></i><span>Thành viên</span></button>
+                <button class="menu-item" data-tab="tree"><i class="fas fa-tree"></i><span>Đội nhóm</span></button>
+                <button class="menu-item" data-tab="ranks"><i class="fas fa-star"></i><span>Cấp bậc</span></button>
+                <button class="menu-item" data-tab="customers"><i class="fas fa-shopping-cart"></i><span>Khách hàng</span></button>
+                <button class="menu-item" data-tab="reports"><i class="fas fa-chart-line"></i><span>Báo cáo</span></button>
+                <button class="menu-item" data-tab="settings"><i class="fas fa-cog"></i><span>Cài đặt</span></button>
+            </div>
+
+            <!-- TAB Dashboard -->
+            <div id="tab-dashboard" class="tab-content active">
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div class="stat-card"><i class="fas fa-user-friends text-2xl"></i><div class="text-2xl font-bold mt-1" id="totalMembers">0</div><div class="text-xs opacity-90">Tổng thành viên</div></div>
+                    <div class="stat-card"><i class="fas fa-users text-2xl"></i><div class="text-2xl font-bold mt-1" id="totalCustomers">0</div><div class="text-xs opacity-90">Tổng khách hàng</div></div>
+                    <div class="stat-card"><i class="fas fa-chart-line text-2xl"></i><div class="text-2xl font-bold mt-1" id="totalPoints">0</div><div class="text-xs opacity-90">Tổng điểm</div></div>
+                    <div class="stat-card"><i class="fas fa-calendar-alt text-2xl"></i><div class="text-2xl font-bold mt-1" id="monthPoints">0</div><div class="text-xs opacity-90">Điểm tháng này</div></div>
+                </div>
+
+                <div class="card">
+                    <div class="flex justify-between items-center mb-3"><h3 class="font-bold"><i class="fas fa-chart-pie"></i> Cơ cấu cấp bậc</h3><span class="text-xs" id="totalRanks">Tổng số cấp: 0</span></div>
+                    <canvas id="rankChart" height="150"></canvas>
+                </div>
+
+                <div class="card">
+                    <h3 class="font-bold mb-2"><i class="fas fa-trophy"></i> Top 10 Leader</h3>
+                    <div id="topLeaders" class="space-y-2"></div>
+                </div>
+
+                <div class="card">
+                    <h3 class="font-bold mb-2"><i class="fas fa-user-plus"></i> 20 thành viên gần nhất</h3>
+                    <div id="recentMembers" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                </div>
+            </div>
+
+            <!-- TAB Thành viên -->
+            <div id="tab-members" class="tab-content">
+                <div class="card">
+                    <div class="flex justify-between items-center mb-3"><h3 class="font-bold">Danh sách thành viên</h3><button id="addMemberBtn" class="btn-primary text-sm py-1 px-3"><i class="fas fa-plus"></i> Thêm</button></div>
+                    <input type="text" id="searchMember" placeholder="🔍 Tìm kiếm thành viên..." class="mb-3">
+                    <div id="memberList" class="space-y-2 max-h-96 overflow-y-auto"></div>
+                </div>
+            </div>
+
+            <!-- TAB Đội nhóm -->
+            <div id="tab-tree" class="tab-content">
+                <div class="card">
+                    <h3 class="font-bold mb-2">🌳 Sơ đồ đội nhóm (rẽ nhánh)</h3>
+                    <div id="treeContainer" class="text-sm overflow-x-auto p-2 bg-gray-50 rounded-xl max-h-96 overflow-y-auto"></div>
+                    <p class="text-xs text-gray-500 mt-2">🔹 Nhấn vào <i class="fas fa-plus-circle text-green-600"></i> để thêm cấp dưới</p>
+                </div>
+            </div>
+
+            <!-- TAB Cấp bậc -->
+            <div id="tab-ranks" class="tab-content">
+                <div class="card">
+                    <h3 class="font-bold mb-3">⭐ Hệ thống cấp bậc</h3>
+                    <div class="space-y-3">
+                        <div class="bg-gray-50 p-3 rounded-xl"><div class="font-bold">Member</div><div>0 điểm</div><div class="text-xs text-gray-500">Thành viên cơ bản</div></div>
+                        <div class="bg-green-50 p-3 rounded-xl"><div class="font-bold">Supervisor</div><div>2,500 điểm</div><div class="text-xs text-gray-500">Giám sát viên</div></div>
+                        <div class="bg-blue-50 p-3 rounded-xl"><div class="font-bold">World Team</div><div>4,000 điểm</div><div class="text-xs text-gray-500">Đội ngũ thế giới</div></div>
+                        <div class="bg-yellow-50 p-3 rounded-xl"><div class="font-bold">GET Team</div><div>6,000 điểm</div><div class="text-xs text-gray-500">Đội ngũ xuất sắc</div></div>
+                        <div class="bg-red-50 p-3 rounded-xl"><div class="font-bold">Millionaire</div><div>10,000 điểm</div><div class="text-xs text-gray-500">Triệu phú</div></div>
+                        <div class="bg-purple-50 p-3 rounded-xl"><div class="font-bold">President</div><div>20,000 điểm</div><div class="text-xs text-gray-500">Chủ tịch</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB Khách hàng -->
+            <div id="tab-customers" class="tab-content">
+                <div class="card">
+                    <div class="flex justify-between items-center"><h3 class="font-bold">🛒 Danh sách khách hàng</h3><button id="newCustomerBtn" class="btn-primary text-sm py-1 px-3"><i class="fas fa-plus"></i> Thêm KH</button></div>
+                    <div id="customerList" class="space-y-2 mt-3 max-h-96 overflow-y-auto"></div>
+                </div>
+            </div>
+
+            <!-- TAB Báo cáo -->
+            <div id="tab-reports" class="tab-content">
+                <div class="card">
+                    <h3 class="font-bold mb-2"><i class="fas fa-chart-line"></i> Điểm theo tháng</h3>
+                    <canvas id="monthlyChart" height="200"></canvas>
+                </div>
+                <div class="card">
+                    <h3 class="font-bold mb-2"><i class="fas fa-download"></i> Xuất báo cáo</h3>
+                    <button id="exportReportBtn" class="btn-primary w-full"><i class="fas fa-file-excel"></i> Xuất Excel thành viên</button>
+                </div>
+            </div>
+
+            <!-- TAB Cài đặt -->
+            <div id="tab-settings" class="tab-content">
+                <div class="card">
+                    <h3 class="font-bold mb-2">⚙️ Cài đặt hệ thống</h3>
+                    <div class="mb-3 p-2 bg-gray-50 rounded-lg">
+                        <p class="text-xs text-gray-600"><i class="fas fa-envelope"></i> Email đăng nhập: <span id="userEmail"></span></p>
+                        <p class="text-xs text-gray-600 mt-1"><i class="fas fa-shield-alt"></i> Quyền: <span id="userRole"></span></p>
+                    </div>
+                    <button id="logoutBtn" class="bg-red-500 text-white rounded-full px-4 py-2 w-full"><i class="fas fa-sign-out-alt"></i> Đăng xuất</button>
+                    <p class="text-xs text-gray-400 mt-3 text-center">DiepLe Healthy © 2025</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal thêm/sửa thành viên -->
+<div id="memberModal" class="modal hidden" style="display:none;">
+    <div class="modal-content p-5">
+        <h3 class="font-bold text-lg mb-3" id="modalTitle">Thêm thành viên</h3>
+        <input type="text" id="memberName" placeholder="Họ tên *" class="mb-2">
+        <input type="email" id="memberEmail" placeholder="Email" class="mb-2">
+        <input type="tel" id="memberPhone" placeholder="Số điện thoại" class="mb-2">
+        <input type="number" id="memberPoints" placeholder="Điểm số" value="0" class="mb-2">
+        <input type="text" id="memberSponsor" placeholder="Mã người giới thiệu (Sponsor ID)">
+        <div class="flex gap-2 mt-4">
+            <button id="saveMemberBtn" class="btn-primary flex-1">Lưu</button>
+            <button id="closeModalBtn" class="bg-gray-300 rounded-full px-4">Hủy</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Firebase Config của bạn
+    const firebaseConfig = {
+        apiKey: "AIzaSyBqhyZuyS9Q47sZq73V7HA1o2ib2GPwgd0",
+        authDomain: "quanlydoinhom.firebaseapp.com",
+        projectId: "quanlydoinhom",
+        storageBucket: "quanlydoinhom.firebasestorage.app",
+        messagingSenderId: "576390863148",
+        appId: "1:576390863148:web:73b6f206dca28c4d553489",
+        measurementId: "G-CEH30X62K7"
+    };
+
+    // Khởi tạo Firebase
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // Hệ thống cấp bậc
+    const rankSystem = [
+        { name: "Member", minPoints: 0, color: "gray" },
+        { name: "Supervisor", minPoints: 2500, color: "green" },
+        { name: "World Team", minPoints: 4000, color: "blue" },
+        { name: "GET Team", minPoints: 6000, color: "yellow" },
+        { name: "Millionaire", minPoints: 10000, color: "red" },
+        { name: "President", minPoints: 20000, color: "purple" }
+    ];
+
+    function getRank(points) {
+        for(let i = rankSystem.length-1; i >= 0; i--) {
+            if(points >= rankSystem[i].minPoints) return rankSystem[i];
+        }
+        return rankSystem[0];
+    }
+
+    let currentUser = null;
+
+    async function loadDashboard() {
+        const membersSnap = await db.collection("members").get();
+        const customersSnap = await db.collection("customers").get();
+        let totalPoints = 0, monthPoints = 0, now = new Date();
+        let memberList = [];
+        membersSnap.forEach(doc => {
+            let data = doc.data();
+            totalPoints += data.points || 0;
+            if(data.createdAt && data.createdAt.toDate && data.createdAt.toDate().getMonth() === now.getMonth()) monthPoints += data.points || 0;
+            memberList.push({ id: doc.id, ...data });
+        });
+        document.getElementById("totalMembers").innerText = membersSnap.size;
+        document.getElementById("totalCustomers").innerText = customersSnap.size;
+        document.getElementById("totalPoints").innerText = totalPoints;
+        document.getElementById("monthPoints").innerText = monthPoints;
+        
+        let rankCount = [0,0,0,0,0,0];
+        memberList.forEach(m => { let r = getRank(m.points || 0); rankCount[rankSystem.findIndex(rs => rs.name === r.name)]++; });
+        document.getElementById("totalRanks").innerHTML = `Tổng số cấp: ${rankSystem.length}`;
+        if(window.rankChart) window.rankChart.destroy();
+        const ctx = document.getElementById('rankChart').getContext('2d');
+        window.rankChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: rankSystem.map(r => r.name), datasets: [{ label: 'Số thành viên', data: rankCount, backgroundColor: '#2b7a3e' }] }
+        });
+
+        let sorted = memberList.sort((a,b) => (b.points||0) - (a.points||0)).slice(0,10);
+        let topHtml = '';
+        sorted.forEach((m, idx) => { let rank = getRank(m.points||0); topHtml += `<div class="table-row"><span>${idx+1}. ${m.name}</span><span class="font-bold">${m.points||0} điểm</span><span class="rank-badge rank-${rankSystem.findIndex(r=>r.name===rank.name)}">${rank.name}</span></div>`; });
+        document.getElementById("topLeaders").innerHTML = topHtml || "Chưa có dữ liệu";
+
+        let recent = memberList.sort((a,b) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0)).slice(0,20);
+        let recentHtml = '';
+        recent.forEach(m => { recentHtml += `<div class="flex justify-between items-center p-2 bg-gray-50 rounded-lg"><div><i class="fas fa-user"></i> ${m.name}</div><div>${m.points||0} điểm</div></div>`; });
+        document.getElementById("recentMembers").innerHTML = recentHtml || "Chưa có thành viên";
+    }
+
+    async function loadMembers(search = '') {
+        let snap = await db.collection("members").get();
+        let html = '';
+        snap.forEach(doc => {
+            let data = doc.data();
+            if(search && !data.name.toLowerCase().includes(search.toLowerCase()) && !data.email?.toLowerCase().includes(search.toLowerCase())) return;
+            let rank = getRank(data.points || 0);
+            html += `<div class="border rounded-xl p-3 bg-white shadow-sm">
+                        <div class="flex justify-between items-start">
+                            <div><div class="font-bold">${data.name}</div><div class="text-xs text-gray-500">📧 ${data.email || 'Chưa có'}</div><div class="text-xs">📞 ${data.phone || 'Chưa có'}</div></div>
+                            <div class="text-right"><span class="rank-badge rank-${rankSystem.findIndex(r=>r.name===rank.name)}">${rank.name}</span><div class="font-bold text-green-700 mt-1">${data.points||0} điểm</div></div>
+                        </div>
+                        <div class="flex gap-2 mt-2">
+                            <button class="editMember bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs" data-id="${doc.id}"><i class="fas fa-edit"></i> Sửa</button>
+                            <button class="deleteMember bg-red-100 text-red-700 px-2 py-1 rounded-full text-xs" data-id="${doc.id}"><i class="fas fa-trash"></i> Xóa</button>
+                            <button class="viewDownline bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs" data-id="${doc.id}"><i class="fas fa-tree"></i> Nhánh dưới</button>
+                        </div>
+                    </div>`;
+        });
+        document.getElementById("memberList").innerHTML = html || "<p class='text-center text-gray-400'>Chưa có thành viên</p>";
+        attachMemberEvents();
+    }
+
+    function attachMemberEvents() {
+        document.querySelectorAll('.editMember').forEach(btn => btn.addEventListener('click', async (e) => { let id = btn.dataset.id; let doc = await db.collection("members").doc(id).get(); let data = doc.data(); document.getElementById("memberName").value = data.name; document.getElementById("memberEmail").value = data.email||''; document.getElementById("memberPhone").value = data.phone||''; document.getElementById("memberPoints").value = data.points||0; document.getElementById("memberSponsor").value = data.sponsorId||''; document.getElementById("modalTitle").innerText = "Sửa thành viên"; document.getElementById("memberModal").style.display = "flex"; window.editId = id; }));
+        document.querySelectorAll('.deleteMember').forEach(btn => btn.addEventListener('click', async (e) => { if(confirm("Xóa thành viên?")) await db.collection("members").doc(btn.dataset.id).delete(); loadDashboard(); loadMembers(); loadTree(); }));
+        document.querySelectorAll('.viewDownline').forEach(btn => btn.addEventListener('click', async (e) => { let id = btn.dataset.id; showDownlineModal(id); }));
+    }
+
+    async function showDownlineModal(memberId) {
+        let members = await db.collection("members").get();
+        let downline = [];
+        members.forEach(doc => { if(doc.data().sponsorId === memberId) downline.push({id:doc.id, ...doc.data()}); });
+        let html = `<div class="modal" style="display:flex;" id="downlineModal"><div class="modal-content p-4"><h3 class="font-bold mb-2">Nhánh dưới của ${memberId}</h3>`;
+        if(downline.length === 0) html += `<p class="text-gray-400">Chưa có thành viên cấp dưới</p>`;
+        else downline.forEach(m => { html += `<div class="border-b py-2"><b>${m.name}</b> - ${getRank(m.points).name} (${m.points||0} điểm)</div>`; });
+        html += `<button id="closeDownlineModal" class="btn-primary w-full mt-3">Đóng</button></div></div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+        document.getElementById("closeDownlineModal").addEventListener('click', () => document.getElementById("downlineModal").remove());
+    }
+
+    async function loadTree() {
+        let members = await db.collection("members").get();
+        let map = new Map();
+        members.forEach(doc => { let d=doc.data(); d.id=doc.id; map.set(doc.id, d); });
+        let children = new Map();
+        for(let [id, mem] of map.entries()) { let sp = mem.sponsorId; if(sp && map.has(sp)) { if(!children.has(sp)) children.set(sp, []); children.get(sp).push({id, name:mem.name, points:mem.points}); } }
+        let root = null;
+        for(let [id, mem] of map.entries()) { if(!mem.sponsorId || !map.has(mem.sponsorId)) root = id; }
+        function buildTree(id, level=0) {
+            let node = map.get(id);
+            if(!node) return '';
+            let childNodes = children.get(id) || [];
+            let html = `<div class="tree-node" style="margin-left:${level*0.5}rem"><div class="flex items-center justify-between p-2 bg-white rounded-lg mb-1"><div><i class="fas fa-user"></i> ${node.name}</div><div>${getRank(node.points).name}<br><span class="text-xs">${node.points||0}đ</span></div><button class="addSub text-green-600 text-sm" data-sponsor="${id}"><i class="fas fa-plus-circle"></i></button></div>`;
+            for(let child of childNodes) html += buildTree(child.id, level+1);
+            html += `</div>`;
+            return html;
+        }
+        let container = document.getElementById("treeContainer");
+        if(root) container.innerHTML = buildTree(root);
+        else container.innerHTML = "<div class='text-center text-gray-400'>Chưa có cấu trúc đội nhóm</div>";
+        document.querySelectorAll('.addSub').forEach(btn => btn.addEventListener('click', () => { document.getElementById("memberSponsor").value = btn.dataset.sponsor; document.querySelector('[data-tab="members"]').click(); document.getElementById("addMemberBtn").click(); }));
+    }
+
+    async function loadCustomers() {
+        let snap = await db.collection("customers").get();
+        let html = '';
+        snap.forEach(doc => { let d=doc.data(); html += `<div class="border rounded-xl p-3 bg-white"><div><b>${d.name}</b> - ${d.phone||'Chưa có SĐT'}</div><div class="text-xs text-gray-500 mt-1">${d.note||''}</div><button class="deleteCustomer text-red-500 text-xs mt-1" data-id="${doc.id}"><i class="fas fa-trash"></i> Xóa</button></div>`; });
+        document.getElementById("customerList").innerHTML = html || "<p class='text-gray-400'>Chưa có khách hàng</p>";
+        document.querySelectorAll('.deleteCustomer').forEach(btn => btn.addEventListener('click', async (e) => { await db.collection("customers").doc(btn.dataset.id).delete(); loadCustomers(); }));
+    }
+
+    async function loadMonthlyChart() {
+        let members = await db.collection("members").get();
+        let monthlyData = new Array(12).fill(0);
+        members.forEach(doc => { let d=doc.data(); if(d.createdAt && d.createdAt.toDate) { let month = d.createdAt.toDate().getMonth(); monthlyData[month] += d.points || 0; } });
+        if(window.monthlyChart) window.monthlyChart.destroy();
+        const ctx = document.getElementById('monthlyChart').getContext('2d');
+        window.monthlyChart = new Chart(ctx, { type: 'line', data: { labels: ['T1','T2','T3','T4','T5','T6','T7','T8','T9','T10','T11','T12'], datasets: [{ label: 'Điểm', data: monthlyData, borderColor: '#2b7a3e', tension: 0.3 }] } });
+    }
+
+    // CRUD Member
+    document.getElementById("saveMemberBtn")?.addEventListener('click', async () => {
+        let name = document.getElementById("memberName").value;
+        if(!name) return alert("Vui lòng nhập tên");
+        let data = { name, email: document.getElementById("memberEmail").value, phone: document.getElementById("memberPhone").value, points: parseInt(document.getElementById("memberPoints").value)||0, sponsorId: document.getElementById("memberSponsor").value || null, updatedAt: new Date() };
+        if(window.editId) { await db.collection("members").doc(window.editId).update(data); delete window.editId; }
+        else { data.createdAt = new Date(); await db.collection("members").add(data); }
+        document.getElementById("memberModal").style.display = "none";
+        loadDashboard(); loadMembers(); loadTree();
+    });
+    document.getElementById("closeModalBtn")?.addEventListener('click', () => document.getElementById("memberModal").style.display = "none");
+    document.getElementById("addMemberBtn")?.addEventListener('click', () => { document.getElementById("modalTitle").innerText = "Thêm thành viên"; document.getElementById("memberName").value = ""; document.getElementById("memberEmail").value = ""; document.getElementById("memberPhone").value = ""; document.getElementById("memberPoints").value = "0"; document.getElementById("memberSponsor").value = ""; document.getElementById("memberModal").style.display = "flex"; delete window.editId; });
+    document.getElementById("newCustomerBtn")?.addEventListener('click', async () => { let name = prompt("Tên khách hàng:"); if(name) await db.collection("customers").add({ name, phone: prompt("SĐT:"), note: prompt("Ghi chú:"), createdAt: new Date() }); loadCustomers(); });
+    document.getElementById("exportReportBtn")?.addEventListener('click', async () => { let snap = await db.collection("members").get(); let csv = "Tên,Email,Điện thoại,Điểm,Cấp bậc,Người giới thiệu\n"; snap.forEach(doc => { let d=doc.data(); csv += `"${d.name}","${d.email||''}","${d.phone||''}",${d.points||0},"${getRank(d.points||0).name}","${d.sponsorId||''}"\n`; }); let blob = new Blob([csv], {type:"text/csv"}); let a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="members_report.csv"; a.click(); });
+    document.getElementById("logoutBtn")?.addEventListener('click', () => auth.signOut());
+    document.getElementById("searchMember")?.addEventListener('input', e => loadMembers(e.target.value));
+
+    // Auth
+    auth.onAuthStateChanged(async(user) => {
+        if(user) {
+            currentUser = user;
+            document.getElementById("authScreen").style.display = "none";
+            document.getElementById("dashboardScreen").style.display = "block";
+            document.getElementById("userName").innerText = user.displayName?.split(' ')[0] || "User";
+            document.getElementById("userEmail").innerText = user.email;
+            // Phân quyền đơn giản: email admin@dieple.com là admin
+            const isAdmin = user.email === "dieplehealthy@gmail.com";
+            document.getElementById("userRole").innerText = isAdmin ? "Quản trị viên (Full quyền)" : "Thành viên (Chỉ xem)";
+            await loadDashboard(); await loadMembers(); await loadTree(); await loadCustomers(); await loadMonthlyChart();
+        } else {
+            document.getElementById("authScreen").style.display = "block";
+            document.getElementById("dashboardScreen").style.display = "none";
+        }
+    });
+    document.getElementById("googleLoginBtn")?.addEventListener('click', () => auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()));
+
+    // Tab switching
+    document.querySelectorAll('.menu-item').forEach(btn => { btn.addEventListener('click', () => { document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active')); document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active'); document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active')); btn.classList.add('active'); if(btn.dataset.tab === 'tree') loadTree(); if(btn.dataset.tab === 'members') loadMembers(); if(btn.dataset.tab === 'customers') loadCustomers(); }); });
+</script>
+</body>
+</html>
